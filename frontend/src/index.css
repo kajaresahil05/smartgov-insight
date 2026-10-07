@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .otp-box-shadow {
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.15);
+  }
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+input:focus {
+  outline: none;
+}
