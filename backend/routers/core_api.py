@@ -105,29 +105,121 @@ class ComplaintSubmitReq(BaseModel):
     description: str = ""
     urgency: str = "Medium"
     location: str = "Kothrud, Pune"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location_accuracy: Optional[float] = None
+    location_source: Optional[str] = "manual"
+    parent_complaint_id: Optional[int] = None
+    is_duplicate: Optional[bool] = False
     images: List[str] = []
 
 @router.post("/complaints")
 def submit_complaint(req: ComplaintSubmitReq, db: Session = Depends(get_db)):
+    # Validate coordinate ranges if provided
+    if req.latitude is not None and not (-90.0 <= req.latitude <= 90.0):
+        raise HTTPException(status_code=400, detail="Latitude must be between -90 and 90 degrees.")
+    if req.longitude is not None and not (-180.0 <= req.longitude <= 180.0):
+        raise HTTPException(status_code=400, detail="Longitude must be between -180 and 180 degrees.")
+
     count = db.query(Complaint).count() + 102
     ticket_number = f"#C-2024-{count}"
     now_str = datetime.utcnow().strftime('%d %b %Y, %I:%M %p')
+    
+    parent_id = req.parent_complaint_id
+    is_dup = req.is_duplicate or False
+    dup_reason = None
+    
+    # Check parent complaint if user selected association
+    parent_complaint = None
+    if parent_id:
+        parent_complaint = db.query(Complaint).filter(Complaint.id == parent_id).first()
+        if parent_complaint:
+            is_dup = True
+            parent_complaint.duplicate_count = (parent_complaint.duplicate_count or 0) + 1
+            dup_reason = f"Linked to canonical complaint {parent_complaint.ticket_number} by citizen"
+            # Append timeline note to parent canonical record
+            try:
+                p_timeline = json.loads(parent_complaint.timeline_json or '[]')
+                p_timeline.append({
+                    "title": "Additional Report Linked",
+                    "time": now_str,
+                    "status": "active",
+                    "note": f"Associated report {ticket_number} merged. Total reports: {parent_complaint.duplicate_count + 1}."
+                })
+                parent_complaint.timeline_json = json.dumps(p_timeline)
+            except Exception as e:
+                print(f"[TIMELINE UPDATE ERROR] {e}")
+    else:
+        # Server-side concurrency check: check if an identical complaint at same location was just submitted
+        try:
+            from duplicate_service import get_duplicate_engine
+            engine = get_duplicate_engine()
+            recent_complaints = db.query(Complaint).order_by(Complaint.id.desc()).limit(20).all()
+            existing_candidates = [
+                {
+                    "id": c.id,
+                    "title": c.title,
+                    "description": c.description or "",
+                    "latitude": c.latitude,
+                    "longitude": c.longitude,
+                    "location": c.location,
+                    "ticket_number": c.ticket_number,
+                    "category": c.category
+                }
+                for c in recent_complaints
+            ]
+            
+            dup_match = engine.find_duplicate(
+                title=req.title,
+                description=req.description,
+                category=req.category,
+                latitude=req.latitude,
+                longitude=req.longitude,
+                existing_complaints=existing_candidates
+            )
+            
+            if dup_match and dup_match.get("is_duplicate"):
+                matched_id = dup_match.get("matched_id")
+                matched_c = db.query(Complaint).filter(Complaint.id == matched_id).first()
+                if matched_c:
+                    is_dup = True
+                    parent_id = matched_id
+                    matched_c.duplicate_count = (matched_c.duplicate_count or 0) + 1
+                    dup_reason = f"Automated spatial-semantic duplicate link to {matched_c.ticket_number} (Similarity: {dup_match.get('similarity_score', 0):.2f})"
+        except Exception as dup_err:
+            print(f"[CONCURRENT DUP CHECK ERROR] {dup_err}")
+            
     default_timeline = [
-        {"title": "Submitted", "time": now_str, "status": "completed", "note": "Complaint logged into system."},
-        {"title": "Under Review", "time": "Just Now", "status": "active", "note": "Being reviewed."},
+        {"title": "Submitted", "time": now_str, "status": "completed"},
+        {"title": "Under Review", "time": "In Progress", "status": "active"},
         {"title": "Demand Aggregated", "time": "Pending", "status": "pending"}
     ]
     
     new_c = Complaint(
-        user_id=req.user_id, ticket_number=ticket_number, title=req.title,
-        category=req.category, description=req.description, urgency=req.urgency,
-        location=req.location, images=json.dumps(req.images) if req.images else None,
-        status='Under Review', timeline_json=json.dumps(default_timeline)
+        user_id=req.user_id,
+        ticket_number=ticket_number,
+        title=req.title,
+        category=req.category,
+        description=req.description,
+        urgency=req.urgency,
+        location=req.location,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        location_accuracy=req.location_accuracy,
+        location_source=req.location_source or 'manual',
+        parent_complaint_id=parent_id,
+        is_duplicate=is_dup,
+        duplicate_reason=dup_reason,
+        duplicate_count=0,
+        images=json.dumps(req.images) if req.images else None,
+        status='Under Review',
+        timeline_json=json.dumps(default_timeline)
     )
     notif = Notification(user_id=req.user_id, text=f'Complaint {ticket_number} submitted via FastAPI.')
     db.add(new_c)
     db.add(notif)
     db.commit()
+    db.refresh(new_c)
     return {"success": True, "complaint": new_c.to_dict()}
 
 @router.get("/complaints")
@@ -172,11 +264,34 @@ def get_community_issues(location: str = "Kothrud, Pune", db: Session = Depends(
     }
 
 # --- CITIZEN ---
+class CitizenProfileUpdateReq(BaseModel):
+    user_id: int
+    full_name: Optional[str] = None
+    mobile: Optional[str] = None
+    location: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
 @router.get("/citizen/profile")
 def get_citizen_profile(user_id: int, db: Session = Depends(get_db)):
     u = db.query(User).get(user_id)
     if not u: raise HTTPException(status_code=404, detail="Not found")
     return {"success": True, "profile": u.to_dict()}
+
+@router.put("/citizen/profile")
+def update_citizen_profile(req: CitizenProfileUpdateReq, db: Session = Depends(get_db)):
+    u = db.query(User).get(req.user_id)
+    if not u: raise HTTPException(status_code=404, detail="Not found")
+    if req.full_name is not None: u.full_name = req.full_name
+    if req.mobile is not None: u.mobile = req.mobile
+    if req.location is not None: u.location = req.location
+    if req.latitude is not None and (-90.0 <= req.latitude <= 90.0):
+        u.preferred_latitude = req.latitude
+    if req.longitude is not None and (-180.0 <= req.longitude <= 180.0):
+        u.preferred_longitude = req.longitude
+    db.commit()
+    db.refresh(u)
+    return {"success": True, "message": "Profile updated successfully", "profile": u.to_dict()}
 
 @router.get("/citizen/notifications")
 def get_cit_notifs(user_id: int, db: Session = Depends(get_db)):
@@ -197,23 +312,234 @@ class AiTextReq(BaseModel):
     text: str = ""
     title: str = ""
     description: str = ""
+    category: str = ""
+
+class UrgencyReq(BaseModel):
+    title: str
+    description: str
+    category: str = ""
+
+# Lazy load AI models
+ml_model = None
+ml_vectorizer = None
+ml_label_mapping = None
+
+urgency_model = None
+urgency_tokenizer = None
+urgency_label_map = None
+
+def get_ml_model():
+    global ml_model, ml_vectorizer, ml_label_mapping
+    if ml_model is None:
+        try:
+            import joblib
+            import json
+            
+            print("Loading ML model from ML_models/...")
+            ml_model = joblib.load("ML_models/complaint_classifier.joblib")
+            ml_vectorizer = joblib.load("ML_models/tfidf_vectorizer.joblib")
+            
+            with open("ML_models/label_mapping.json", "r") as f:
+                mapping = json.load(f)
+                ml_label_mapping = {int(k): v for k, v in mapping["id2label"].items()}
+            print("Category Model loaded successfully.")
+        except Exception as e:
+            print("Failed to load Category model:", e)
+    return ml_model, ml_vectorizer, ml_label_mapping
+
+def get_urgency_model():
+    global urgency_model, urgency_tokenizer, urgency_label_map
+    if urgency_model is None:
+        try:
+            from transformers import AutoTokenizer, AutoModelForSequenceClassification
+            import json
+            
+            model_path = "./ML_models/complaint_urgency_distilbert"
+            print(f"Loading Urgency model from {model_path}...")
+            urgency_tokenizer = AutoTokenizer.from_pretrained(model_path)
+            urgency_model = AutoModelForSequenceClassification.from_pretrained(model_path)
+            urgency_model.eval()
+            
+            with open(f"{model_path}/label_mapping.json", "r") as f:
+                mapping = json.load(f)
+                urgency_label_map = {int(k): v for k, v in mapping["id2label"].items()}
+            print("Urgency Model loaded successfully.")
+        except Exception as e:
+            print("Failed to load Urgency model:", e)
+    return urgency_model, urgency_tokenizer, urgency_label_map
 
 @router.post("/ai/complaint-assist")
 def ai_assist(req: AiTextReq):
-    t = req.text.lower()
-    if 'road' in t or 'pothole' in t: sugg = "Damaged road sections causing severe risk."
-    elif 'water' in t or 'leak' in t: sugg = "Major water pipeline leakage observed."
-    elif 'garbage' in t: sugg = "Solid waste and garbage accumulation causing hazards."
-    else: sugg = f"Civic Infrastructure Issue: {req.text}. Requires inspection."
+    c = req.category.strip().lower()
+    t = req.title.strip()
+    d = req.text.strip() if req.text.strip() else req.description.strip()
+    
+    # Clean recursive boilerplate if user clicks AI Polish on previously polished text
+    clean_d = d
+    for phrase in [
+        "The area is experiencing an infrastructure issue:",
+        "The following issue has been reported:",
+        "A sanitation issue involves:",
+        "Street light concern reported:",
+        "An electrical supply complication has been detailed as",
+        "Resident reported a civic issue regarding",
+        "According to the report:",
+        "Please investigate the cause and restore normal conditions as soon as possible.",
+        "Please inspect the affected section and arrange appropriate repairs as this creates difficulties for vehicles and pedestrians.",
+        "This requires prompt clearing to prevent accumulation and maintain hygiene in the locality.",
+        "Please investigate and repair this issue, as it reduces visibility and creates safety concerns.",
+        "This disruption requires maintenance to restore a safe and reliable power grid.",
+        "This matter requires municipal assessment and appropriate intervention."
+    ]:
+        clean_d = clean_d.replace(phrase, "")
+    
+    clean_d = clean_d.replace(f"'{t}'", "").replace(f'"{t}"', "").replace("..", ".").strip(" ':.")
+    if not clean_d: clean_d = d if d else t
+    if not t: t = c if c else "civic issue"
+        
+    # Context-aware generator matching constraints without LLM availability
+    if "road" in c or "pothole" in t.lower() or "road" in t.lower():
+        sugg = f"The following issue has been reported: '{t}'. {clean_d.capitalize()}. Please inspect the affected section and arrange appropriate repairs as this creates difficulties for vehicles and pedestrians."
+    elif "garbage" in c or "sanitation" in c:
+        sugg = f"A sanitation issue involves '{t}'. Specifically: {clean_d}. This requires prompt clearing to prevent accumulation and maintain hygiene in the locality."
+    elif "light" in c or "streetlight" in c:
+        sugg = f"Street light concern reported: '{t}'. {clean_d.capitalize()}. Please investigate and repair this issue, as it reduces visibility and creates safety concerns."
+    elif "water" in c or "drainage" in c:
+        sugg = f"The area is experiencing an infrastructure issue: '{t}'. According to the report: {clean_d}. Please investigate the cause and restore normal conditions as soon as possible."
+    elif "electric" in c:
+        sugg = f"An electrical supply complication has been detailed as '{t}'. {clean_d.capitalize()}. This disruption requires maintenance to restore a safe and reliable power grid."
+    else:
+        sugg = f"Resident reported a {c if c else 'civic'} issue regarding '{t}'. The detailed observation is: {clean_d}. This matter requires municipal assessment and appropriate intervention."
+        
+    sugg = sugg.replace("..", ".").replace(" .", ".").strip()
     return {"success": True, "suggestion": sugg}
 
 @router.post("/ai/classify-complaint")
 def ai_classify(req: AiTextReq):
-    t = f"{req.title} {req.description}".lower()
-    if any(k in t for k in ['road', 'pothole']): return {"success": True, "category": "Road", "confidence": 94, "issue": "Road Damage"}
-    if any(k in t for k in ['water', 'pipe', 'leak']): return {"success": True, "category": "Water", "confidence": 92, "issue": "Pipeline Leak"}
-    if any(k in t for k in ['garbage', 'trash']): return {"success": True, "category": "Garbage", "confidence": 96, "issue": "Solid Waste"}
-    return {"success": True, "category": "Other", "confidence": 75, "issue": "General Inquiry"}
+    model, vectorizer, label_map = get_ml_model()
+    
+    if not model or not vectorizer:
+        return {"success": True, "category": "Other Civic Issues", "confidence": 50.0, "issue": "Fallback"}
+
+    combined_text = f"Title: {req.title.strip()} Description: {req.description.strip()}"
+    print(f"[AI CLASSIFY INPUT] {combined_text}")
+    
+    try:
+        X_vec = vectorizer.transform([combined_text])
+        probs = model.predict_proba(X_vec)[0]
+        
+        all_probs = {label_map[i]: round(float(p) * 100, 2) for i, p in enumerate(probs)}
+        sorted_probs = sorted(all_probs.items(), key=lambda x: x[1], reverse=True)
+        
+        top_category, confidence = sorted_probs[0]
+        
+        print("-" * 40)
+        print(f"\n[AI PREDICTION CLASS] {top_category} ({confidence}%)")
+        print("\nAll class probabilities:")
+        for cat, prob in all_probs.items():
+            print(f"{cat}: {prob}%")
+        print("-" * 40)
+        
+        return {
+            "success": True,
+            "category": top_category,
+            "confidence": confidence,
+            "all_probs": all_probs,
+            "issue": f"{top_category} Issue"
+        }
+    except Exception as e:
+        print(f"[AI PREDICTION ERROR] {e}")
+        return {"success": True, "category": "Other Civic Issues", "confidence": 50.0, "issue": "Exception"}
+
+@router.post("/ai/predict-urgency")
+def predict_urgency(req: UrgencyReq):
+    model, tokenizer, label_map = get_urgency_model()
+    
+    if not model or not tokenizer:
+        return {
+            "success": True, 
+            "urgency": "Medium", 
+            "confidence": 50.0, 
+            "reason": "Routine civic issue assessment applied as safe fallback."
+        }
+        
+    combined = f"Title: {req.title.strip()} Description: {req.description.strip()}"
+    
+    try:
+        import torch
+        inputs = tokenizer(combined, return_tensors="pt", truncation=True, padding=True, max_length=128)
+        with torch.no_grad():
+            outputs = model(**inputs)
+            
+        probs = torch.nn.functional.softmax(outputs.logits, dim=-1)[0]
+        all_probs = {label_map[i]: float(p) * 100 for i, p in enumerate(probs)}
+        
+        sorted_probs = sorted(all_probs.items(), key=lambda x: x[1], reverse=True)
+        top_urgency, confidence = sorted_probs[0]
+        
+        reason = ""
+        if top_urgency == "Critical":
+            reason = "Priority review recommended because the complaint suggests an immediate threat to life, active structural failure, or serious wide-scale safety risk."
+        elif top_urgency == "High":
+            reason = "Serious issue involving substantial disruption or potential harm, requiring priority handling."
+        elif top_urgency == "Medium":
+            reason = "Issue requires timely attention but has limited immediate danger."
+        else:
+            reason = "Routine issue categorized with limited immediate harm and no significant safety risk."
+            
+        return {
+            "success": True,
+            "urgency": top_urgency,
+            "confidence": round(confidence, 2),
+            "reason": reason
+        }
+    except Exception as e:
+        print(f"[URGENCY ERROR] {e}")
+        return {
+            "success": True, 
+            "urgency": "Medium", 
+            "confidence": 50.0, 
+            "reason": "Exception during AI evaluation. Standard priority applied."
+        }
+
+# --- DUPLICATE COMPLAINT DETECTION (MODEL 3) ---
+class DuplicateDetectReq(BaseModel):
+    title: str
+    description: str = ""
+    location: str = "Kothrud, Pune, Maharashtra"
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    category: Optional[str] = ""
+    user_id: Optional[int] = None
+
+@router.post("/detect-duplicate")
+@router.post("/ai/detect-duplicate")
+def api_detect_duplicate(req: DuplicateDetectReq, db: Session = Depends(get_db)):
+    try:
+        from duplicate_service import detect_duplicates_in_db
+        return detect_duplicates_in_db(
+            title=req.title,
+            description=req.description,
+            location=req.location,
+            latitude=req.latitude,
+            longitude=req.longitude,
+            category=req.category,
+            user_id=req.user_id,
+            db=db
+        )
+    except Exception as e:
+        print(f"[DUPLICATE DETECTION API ERROR] {e}")
+        return {
+            "success": False,
+            "has_duplicate": False,
+            "decision": "error",
+            "similarity_score": 0.0,
+            "similarity_percent": 0.0,
+            "matched_complaint": None,
+            "location_comparison": None,
+            "recommendation": "Unable to check duplicates at this moment. You may proceed with submission.",
+            "error": str(e)
+        }
 
 class ChatReq(BaseModel):
     query: str

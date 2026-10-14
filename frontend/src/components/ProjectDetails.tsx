@@ -1,9 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Share2, MapPin, CheckCircle2, Circle, Clock } from 'lucide-react';
+import { ArrowLeft, Share2, MapPin, CheckCircle2 } from 'lucide-react';
+import { LocationMapPicker } from './common/LocationMapPicker';
 
-export default function ProjectDetails({ projectId, onNavigateBack }) {
-  const [project, setProject] = useState(null);
+interface Milestone {
+  name: string;
+  status: string;
+}
+
+interface ProjectData {
+  id: number;
+  title: string;
+  category: string;
+  location: string;
+  status: string;
+  progress: number;
+  start_date: string;
+  expected_end: string;
+  estimated_cost: string;
+  latitude?: number;
+  longitude?: number;
+  milestones?: Milestone[];
+}
+
+interface ProjectDetailsProps {
+  projectId: number | null;
+  onNavigateBack: () => void;
+}
+
+export default function ProjectDetails({ projectId, onNavigateBack }: ProjectDetailsProps) {
+  const [project, setProject] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showMap, setShowMap] = useState(false);
 
   useEffect(() => {
     fetchProjectDetail();
@@ -88,12 +115,29 @@ export default function ProjectDetails({ projectId, onNavigateBack }) {
         </div>
       </div>
 
+      {/* Embedded Leaflet Map */}
+      {showMap && (
+        <div className="space-y-2 pt-1">
+          <div className="flex justify-between items-center text-xs font-bold text-slate-800">
+            <span>Project Location on Leaflet Map</span>
+            <span className="text-[10px] font-semibold text-emerald-600">OpenStreetMap Data</span>
+          </div>
+          <LocationMapPicker
+            latitude={Number(project.latitude || 18.5074)}
+            longitude={Number(project.longitude || 73.8077)}
+            interactive={false}
+            height="220px"
+            showSearchBar={false}
+          />
+        </div>
+      )}
+
       {/* Milestones Timeline Checklist */}
       <div className="pt-2">
         <div className="text-xs font-extrabold text-slate-900 mb-4">Milestones</div>
 
         <div className="relative pl-6 space-y-4 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-          {project.milestones && project.milestones.map((m, idx) => (
+          {project.milestones && project.milestones.map((m: Milestone, idx: number) => (
             <div key={idx} className="relative flex items-center justify-between">
               
               <div className="flex items-center space-x-2">
@@ -127,9 +171,13 @@ export default function ProjectDetails({ projectId, onNavigateBack }) {
       </div>
 
       {/* Bottom Button */}
-      <button className="w-full py-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold rounded-2xl text-xs flex items-center justify-center space-x-2 transition-colors mt-2">
+      <button
+        type="button"
+        onClick={() => setShowMap(!showMap)}
+        className="w-full py-3 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-800 font-bold rounded-2xl text-xs flex items-center justify-center space-x-2 transition-colors mt-2"
+      >
         <MapPin className="w-4 h-4 text-emerald-600" />
-        <span>View on Map</span>
+        <span>{showMap ? 'Hide Leaflet Map' : 'View on Leaflet Map'}</span>
       </button>
 
     </div>

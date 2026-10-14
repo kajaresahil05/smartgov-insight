@@ -1,0 +1,94 @@
+{
+  "projects": [
+    [
+      1,
+      "Road Repair & Resurfacing - Paud Road Corridor",
+      "Road",
+      "In Progress",
+      null,
+      72
+    ],
+    [
+      2,
+      "Smart Stormwater Drainage & Culvert Upgrade",
+      "Drainage",
+      "In Progress",
+      null,
+      45
+    ],
+    [
+      3,
+      "Solar Powered LED Smart Streetlight Network",
+      "Others",
+      "Completed",
+      null,
+      100
+    ],
+    [
+      4,
+      "Public Bio-Diversity Park & Community Walking Track",
+      "Others",
+      "Initiated",
+      null,
+      25
+    ],
+    [
+      5,
+      "Municipal Water Pipeline Infrastructure Renewal",
+      "Water",
+      "In Progress",
+      null,
+      85
+    ],
+    [
+      6,
+      "Intelligent Traffic Flow Optimization Sensors",
+      "Road",
+      "In Progress",
+      null,
+      65
+    ]
+  ],
+  "vendors": [
+    [
+      1,
+      "VND-4080",
+      "Apex Infra Ltd",
+      "Infrastructure",
+      1,
+      "Pending Review"
+    ],
+    [
+      2,
+      "VND-6944",
+      "Private Limited",
+      "IT",
+      1,
+      "Pending Review"
+    ],
+    [
+      3,
+      "VND-4544",
+      "ABC Private Limited",
+      "Water",
+      1,
+      "Pending Review"
+    ],
+    [
+      4,
+      "VND-9428",
+      "private limited",
+      "Infrastructure",
+      1,
+      "Pending Review"
+    ],
+    [
+      5,
+      "VND-1877",
+      "public limited",
+      "Infrastructure",
+      1,
+      "Pending Review"
+    ]
+  ]
+}

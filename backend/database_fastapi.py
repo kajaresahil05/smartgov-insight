@@ -5,8 +5,8 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # Database Configuration (PostgreSQL with automatic SQLite fallback)
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./smartgov.db")
 
-# For SQLite, we need check_same_thread=False
-connect_args = {"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
+# For SQLite, we need check_same_thread=False and timeout=15
+connect_args = {"check_same_thread": False, "timeout": 15} if "sqlite" in DATABASE_URL else {}
 
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

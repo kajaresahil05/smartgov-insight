@@ -29,6 +29,8 @@ class LoginRequest(BaseModel):
 class RegisterLocationReq(BaseModel):
     user_id: int
     location: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
 
 class RegisterCompleteReq(BaseModel):
     user_id: int
@@ -40,6 +42,10 @@ def register_location(req: RegisterLocationReq, db: Session = Depends(get_db)):
     user = db.query(User).get(req.user_id)
     if user:
         user.location = req.location
+        if req.latitude is not None and (-90.0 <= req.latitude <= 90.0):
+            user.preferred_latitude = req.latitude
+        if req.longitude is not None and (-180.0 <= req.longitude <= 180.0):
+            user.preferred_longitude = req.longitude
         db.commit()
     return {"success": True}
 
@@ -68,7 +74,7 @@ def send_email_otp(req: SendOTPRequest, db: Session = Depends(get_db)):
         if existing_user and existing_user.email_verified:
             raise HTTPException(status_code=400, detail="An account with this email address already exists. Please log in.")
 
-        # Create unverified user if needed
+        # Create unverified user or update existing unverified user
         try:
             user = existing_user
             if not user and req.full_name:
@@ -76,15 +82,30 @@ def send_email_otp(req: SendOTPRequest, db: Session = Depends(get_db)):
                 user = User(
                     full_name=req.full_name,
                     email=email,
-                    mobile=req.mobile,
+                    mobile=req.mobile or "",
                     password_hash=password_hash,
                     email_verified=False
                 )
                 db.add(user)
                 db.commit()
-        except Exception:
+            elif user and not user.email_verified:
+                # Allow user to update their name, mobile, and password if re-submitting step 1
+                if req.full_name:
+                    user.full_name = req.full_name
+                if req.mobile:
+                    user.mobile = req.mobile
+                if req.password:
+                    user.password_hash = generate_password_hash(req.password)
+                db.commit()
+        except Exception as e:
             db.rollback()
-            raise HTTPException(status_code=400, detail="Account conflict error.")
+            err_msg = str(e).lower()
+            if "unique constraint" in err_msg or "unique" in err_msg:
+                if "mobile" in err_msg:
+                    raise HTTPException(status_code=400, detail="This mobile number is already in use by another account.")
+                elif "email" in err_msg:
+                    raise HTTPException(status_code=400, detail="An account with this email address already exists. Please log in.")
+            raise HTTPException(status_code=400, detail=f"Unable to process registration: {str(e)}")
 
     user_name = req.full_name or (user.full_name if user else 'Vendor Representative')
     plain_otp = generate_secure_otp()

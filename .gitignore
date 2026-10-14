@@ -18,3 +18,12 @@ node_modules/
 dist/
 build/
 .DS_Store
+
+# ML Model Binaries (too large for GitHub — use Git LFS or external storage)
+*.safetensors
+*.bin
+*.joblib
+*.pkl
+*.h5
+*.pt
+*.onnx

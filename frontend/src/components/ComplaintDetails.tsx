@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, MapPin, Flag, Calendar, CheckCircle2, Clock, Circle } from 'lucide-react';
+import { ArrowLeft, MapPin, Flag, Calendar, CheckCircle2, Clock, Circle, Compass } from 'lucide-react';
+import { LocationMapPicker } from './common/LocationMapPicker';
 
 export default function ComplaintDetails({ complaintId, onNavigateBack }) {
-  const [complaint, setComplaint] = useState(null);
+  const [complaint, setComplaint] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showMap, setShowMap] = useState(false);
 
   useEffect(() => {
     fetchComplaintDetail();
@@ -26,6 +28,8 @@ export default function ComplaintDetails({ complaintId, onNavigateBack }) {
   if (loading || !complaint) {
     return <div className="p-8 text-center text-xs font-bold text-slate-400">Loading complaint details...</div>;
   }
+
+  const hasCoords = complaint.latitude != null && complaint.longitude != null;
 
   return (
     <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-2xs max-w-xl mx-auto space-y-5">
@@ -61,7 +65,7 @@ export default function ComplaintDetails({ complaintId, onNavigateBack }) {
         <span>•</span>
         <div className="flex items-center space-x-1 text-slate-500">
           <Calendar className="w-3.5 h-3.5" />
-          <span>{complaint.created_at || '25 May 2024, 10:30 AM'}</span>
+          <span>{complaint.created_at || 'Recently'}</span>
         </div>
       </div>
 
@@ -69,26 +73,66 @@ export default function ComplaintDetails({ complaintId, onNavigateBack }) {
       <div>
         <div className="text-xs font-bold text-slate-900 mb-1">Description</div>
         <p className="text-xs text-slate-600 leading-relaxed font-medium">
-          {complaint.description || 'There are large potholes on the main road causing problems for vehicles and accidents during rains.'}
+          {complaint.description || 'No description provided.'}
         </p>
       </div>
 
-      {/* Location */}
-      <div>
-        <div className="text-xs font-bold text-slate-900 mb-1">Location</div>
+      {/* Location Section */}
+      <div className="bg-slate-50/70 p-3.5 rounded-2xl border border-slate-150 space-y-2.5">
         <div className="flex items-center justify-between text-xs">
-          <div className="flex items-center space-x-1.5 text-slate-700 font-semibold">
+          <div className="flex items-center space-x-1.5 text-slate-800 font-bold">
             <MapPin className="w-4 h-4 text-emerald-600 shrink-0" />
-            <span>{complaint.location}</span>
+            <span>Problem Location</span>
           </div>
-          <button className="text-blue-600 font-bold hover:underline text-[11px]">View on Map</button>
+          {hasCoords && (
+            <button
+              type="button"
+              onClick={() => setShowMap(!showMap)}
+              className="text-emerald-700 hover:text-emerald-900 font-extrabold text-[11px] underline"
+            >
+              {showMap ? 'Hide Map' : 'View on Leaflet Map'}
+            </button>
+          )}
         </div>
+
+        <p className="text-xs text-slate-700 font-semibold">{complaint.location}</p>
+
+        {hasCoords && (
+          <div className="flex flex-wrap items-center gap-2 pt-1 text-[10px]">
+            <span className="font-mono bg-white px-2 py-0.5 rounded border border-slate-200 text-slate-600">
+              {Number(complaint.latitude).toFixed(5)}°N, {Number(complaint.longitude).toFixed(5)}°E
+            </span>
+            <span className="bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded border border-emerald-200 font-semibold">
+              Source: {complaint.location_source === 'gps' ? 'Device GPS' : 'Map Pinpoint'}
+            </span>
+            {complaint.location_accuracy != null && (
+              <span className="bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-200 font-semibold">
+                Accuracy: ±{Math.round(complaint.location_accuracy)}m
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Embedded Leaflet Map */}
+        {showMap && hasCoords && (
+          <div className="pt-2">
+            <LocationMapPicker
+              latitude={Number(complaint.latitude)}
+              longitude={Number(complaint.longitude)}
+              accuracy={complaint.location_accuracy}
+              locationSource={complaint.location_source || 'map_picker'}
+              interactive={false}
+              height="200px"
+              showSearchBar={false}
+            />
+          </div>
+        )}
       </div>
 
       {/* Images Grid */}
       {complaint.images && complaint.images.length > 0 && (
         <div>
-          <div className="text-xs font-bold text-slate-900 mb-2">Images</div>
+          <div className="text-xs font-bold text-slate-900 mb-2">Evidence Images</div>
           <div className="grid grid-cols-3 gap-2">
             {complaint.images.slice(0, 3).map((img, idx) => (
               <div key={idx} className="h-20 rounded-xl overflow-hidden bg-slate-100 relative border border-slate-200">
@@ -116,7 +160,7 @@ export default function ComplaintDetails({ complaintId, onNavigateBack }) {
               ✓
             </div>
             <div className="text-xs font-extrabold text-slate-900">Submitted</div>
-            <div className="text-[11px] text-slate-400 font-medium">25 May 2024, 10:30 AM</div>
+            <div className="text-[11px] text-slate-400 font-medium">Received by Portal</div>
           </div>
 
           {/* Step 2: Under Review */}
@@ -125,11 +169,10 @@ export default function ComplaintDetails({ complaintId, onNavigateBack }) {
               ●
             </div>
             <div className="text-xs font-extrabold text-blue-700">Under Review</div>
-            <div className="text-[11px] text-slate-400 font-medium">25 May 2024, 02:15 PM</div>
+            <div className="text-[11px] text-slate-400 font-medium">Assigned to Local Ward Officer</div>
 
-            {/* Popup Tooltip Card matching reference image */}
             <div className="mt-2 p-3 bg-blue-50/80 border border-blue-100 rounded-xl text-[11px] font-medium text-blue-900 max-w-xs shadow-2xs">
-              Your complaint is being reviewed by the concerned department.
+              Your complaint is being reviewed by the concerned municipal department.
             </div>
           </div>
 

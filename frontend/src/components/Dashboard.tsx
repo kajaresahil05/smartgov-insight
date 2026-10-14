@@ -12,9 +12,14 @@ import MyProfile from './MyProfile.jsx';
 import Settings from './Settings.jsx';
 import Notifications from './Notifications.jsx';
 
-export default function Dashboard({ userId, onLogout }) {
-  const [data, setData] = useState({
-    user: { full_name: 'Raj Sanjay Kadam', location: 'Kothrud, Pune, Maharashtra 411038' },
+export default function Dashboard({ userId, onLogout }: any) {
+  const [data, setData] = useState<any>({
+    user: {
+      full_name: 'Raj Sanjay Kadam',
+      location: 'Kothrud, Pune, Maharashtra 411038',
+      preferred_latitude: 18.5074,
+      preferred_longitude: 73.8077
+    },
     stats: { total_complaints: 0, under_review: 0, resolved: 0, total_projects: 0 },
     complaints: [],
     projects: [],
@@ -22,8 +27,8 @@ export default function Dashboard({ userId, onLogout }) {
   });
 
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'submit-complaint' | 'my-complaints' | 'complaint-detail' | 'projects-near-me' | 'project-detail' | 'community-issues' | 'help' | 'chatbot' | 'profile' | 'settings' | 'notifications'
-  const [selectedComplaintId, setSelectedComplaintId] = useState(null);
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedComplaintId, setSelectedComplaintId] = useState<any>(null);
+  const [selectedProjectId, setSelectedProjectId] = useState<any>(null);
 
   useEffect(() => {
     fetchDashboard();
@@ -307,6 +312,11 @@ export default function Dashboard({ userId, onLogout }) {
           {activeTab === 'projects-near-me' && (
             <ProjectsNearMe
               userLocation={data.user.location}
+              userCoords={
+                data.user.preferred_latitude && data.user.preferred_longitude
+                  ? { latitude: data.user.preferred_latitude, longitude: data.user.preferred_longitude }
+                  : undefined
+              }
               onSelectProject={(id) => {
                 setSelectedProjectId(id);
                 setActiveTab('project-detail');
@@ -326,6 +336,11 @@ export default function Dashboard({ userId, onLogout }) {
           {activeTab === 'community-issues' && (
             <CommunityIssues
               userLocation={data.user.location}
+              userCoords={
+                data.user.preferred_latitude && data.user.preferred_longitude
+                  ? { latitude: data.user.preferred_latitude, longitude: data.user.preferred_longitude }
+                  : undefined
+              }
               onReportIssue={() => setActiveTab('submit-complaint')}
             />
           )}

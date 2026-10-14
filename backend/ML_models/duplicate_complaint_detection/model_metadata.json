@@ -1,0 +1,38 @@
+{
+  "model_name": "SmartGov Duplicate Complaint Detection Model (Model 3)",
+  "base_architecture": "SentenceTransformer all-MiniLM-L6-v2",
+  "training_method": "Contrastive Cosine Similarity Fine-Tuning with Group-Aware Zero-Leakage Split",
+  "vector_dimensions": 384,
+  "calibrated_cosine_threshold": 0.54,
+  "spatial_parameters": {
+    "exact_duplicate_max_distance_meters": 150.0,
+    "nearby_cluster_max_distance_meters": 500.0,
+    "uncertain_similarity_range": [
+      0.65,
+      0.54
+    ]
+  },
+  "evaluation_metrics": {
+    "test_sample_size": 783,
+    "accuracy": 0.8621,
+    "precision": 0.7756,
+    "recall": 0.9803,
+    "f1_score": 0.866,
+    "false_positive_rate": 0.2365,
+    "false_negative_rate": 0.0197,
+    "confusion_matrix": {
+      "TP": 349,
+      "FP": 101,
+      "TN": 326,
+      "FN": 7
+    }
+  },
+  "validation_metrics": {
+    "threshold": 0.54,
+    "precision": 0.7893,
+    "recall": 0.9936,
+    "f1_score": 0.8798
+  },
+  "training_duration_seconds": 319.02,
+  "timestamp": "2026-10-10 10:35:23"
+}

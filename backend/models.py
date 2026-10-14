@@ -13,6 +13,8 @@ class User(db.Model):
     mobile = db.Column(db.String(50), unique=True, nullable=False)
     password_hash = db.Column(db.String(255), nullable=False)
     location = db.Column(db.String(255), default='Kothrud, Pune, Maharashtra 411038, India')
+    preferred_latitude = db.Column(db.Float, default=18.5074)
+    preferred_longitude = db.Column(db.Float, default=73.8077)
     dob = db.Column(db.String(50), nullable=True)
     language = db.Column(db.String(50), default='English')
     email_verified = db.Column(db.Boolean, default=False)
@@ -29,6 +31,8 @@ class User(db.Model):
             'email': self.email,
             'mobile': self.mobile,
             'location': self.location,
+            'preferred_latitude': self.preferred_latitude,
+            'preferred_longitude': self.preferred_longitude,
             'dob': self.dob,
             'language': self.language,
             'email_verified': self.email_verified,
@@ -57,6 +61,14 @@ class Complaint(db.Model):
     description = db.Column(db.Text, nullable=True)
     urgency = db.Column(db.String(20), default='Medium')
     location = db.Column(db.String(255), nullable=False)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
+    location_accuracy = db.Column(db.Float, nullable=True)
+    location_source = db.Column(db.String(50), default='manual')
+    parent_complaint_id = db.Column(db.Integer, db.ForeignKey('complaints.id', ondelete='SET NULL'), nullable=True)
+    is_duplicate = db.Column(db.Boolean, default=False)
+    duplicate_count = db.Column(db.Integer, default=0)
+    duplicate_reason = db.Column(db.String(255), nullable=True)
     images = db.Column(db.Text, nullable=True) # JSON list of image URLs
     status = db.Column(db.String(50), default='Under Review')
     timeline_json = db.Column(db.Text, nullable=True)
@@ -68,7 +80,7 @@ class Complaint(db.Model):
             try:
                 img_list = json.loads(self.images)
             except Exception:
-                img_list = []
+                img_list = [self.images]
 
         timeline_list = []
         if self.timeline_json:
@@ -86,6 +98,14 @@ class Complaint(db.Model):
             'description': self.description or '',
             'urgency': self.urgency or 'Medium',
             'location': self.location,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
+            'location_accuracy': self.location_accuracy,
+            'location_source': self.location_source or 'manual',
+            'parent_complaint_id': self.parent_complaint_id,
+            'is_duplicate': bool(self.is_duplicate),
+            'duplicate_count': self.duplicate_count or 0,
+            'duplicate_reason': self.duplicate_reason or '',
             'images': img_list,
             'status': self.status,
             'timeline': timeline_list,
@@ -117,6 +137,8 @@ class Project(db.Model):
     title = db.Column(db.String(255), nullable=False)
     category = db.Column(db.String(100), default='Road')
     location = db.Column(db.String(255), nullable=False)
+    latitude = db.Column(db.Float, nullable=True)
+    longitude = db.Column(db.Float, nullable=True)
     progress = db.Column(db.Integer, default=0)
     status = db.Column(db.String(50), default='In Progress')
     start_date = db.Column(db.String(50), default='10 May 2024')
@@ -139,6 +161,8 @@ class Project(db.Model):
             'title': self.title,
             'category': self.category or 'Road',
             'location': self.location,
+            'latitude': self.latitude,
+            'longitude': self.longitude,
             'progress': self.progress,
             'status': self.status,
             'start_date': self.start_date,

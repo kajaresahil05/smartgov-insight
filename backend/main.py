@@ -5,6 +5,9 @@ from fastapi.staticfiles import StaticFiles
 # Import the new native FastAPI routers
 from routers.auth import router as auth_router
 from routers.core_api import router as core_router
+from routers.location import router as location_router
+from routers.vendor_api import router as vendor_router
+from routers.government_api import router as government_router
 
 # Initialize the new FastAPI application
 app = FastAPI(title="SmartGov Insight API", description="Fully Migrated to FastAPI")
@@ -21,14 +24,30 @@ app.add_middleware(
 # Register the new FastAPI native routers
 app.include_router(auth_router)
 app.include_router(core_router)
+app.include_router(location_router, prefix="/api")
+app.include_router(vendor_router)
+app.include_router(government_router)
 
-# Serve the compiled React application (dist folder) as static files
-# In a real deployed environment, Nginx would handle this, but for local dev it's useful.
-# We mount it at the very end so API routes are caught first.
+from fastapi.responses import FileResponse
 import os
+
 frontend_dist = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
+assets_dir = os.path.join(frontend_dist, 'assets')
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
 if os.path.exists(frontend_dist):
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            return {"detail": "Not Found"}
+        file_path = os.path.join(frontend_dist, full_path)
+        if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        index_file = os.path.join(frontend_dist, "index.html")
+        if os.path.exists(index_file):
+            return FileResponse(index_file)
+        return {"detail": "Not Found"}
 else:
     @app.get("/")
     def index():

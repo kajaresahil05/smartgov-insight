@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Landmark, Users, User, Mail, Lock, Eye, EyeOff, LocateFixed, Search, MapPin, ShieldCheck, UploadCloud, CheckCircle2, Check, LayoutDashboard, Phone, Calendar } from 'lucide-react';
+import { Landmark, Users, User, Mail, Lock, Eye, EyeOff, LocateFixed, Search, MapPin, ShieldCheck, UploadCloud, CheckCircle2, Check, LayoutDashboard, Phone, Calendar, Navigation, Loader2 } from 'lucide-react';
+import { LocationMapPicker } from './common/LocationMapPicker';
+import { requestDeviceLocation, reverseGeocodeCoordinates } from '../services/locationService';
 
 export default function CitizenRegistration({ onNavigateLogin, onNavigateDashboard }) {
   const [step, setStep] = useState(1);
@@ -10,10 +12,16 @@ export default function CitizenRegistration({ onNavigateLogin, onNavigateDashboa
     password: '',
     confirmPassword: '',
     location: 'Kothrud, Pune, Maharashtra 411038, India',
+    latitude: 18.5074,
+    longitude: 73.8077,
+    accuracy: null,
+    locationSource: 'gps',
     dob: '',
     language: 'English',
     userId: null
   });
+
+  const [isLocating, setIsLocating] = useState(false);
 
   // OTP State
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
@@ -205,12 +213,66 @@ export default function CitizenRegistration({ onNavigateLogin, onNavigateDashboa
     }
   };
 
+  const handleUseCurrentLocation = async () => {
+    setIsLocating(true);
+    showToast('Detecting precise GPS coordinates from device...', 'info');
+    try {
+      const geo = await requestDeviceLocation();
+      const lat = geo.coords.latitude;
+      const lon = geo.coords.longitude;
+      const acc = geo.accuracy || null;
+
+      const rev = await reverseGeocodeCoordinates(lat, lon);
+      const addr = rev.formatted_address || 'Current Location, Pune';
+
+      setFormData((prev: any) => ({
+        ...prev,
+        location: addr,
+        latitude: lat,
+        longitude: lon,
+        accuracy: acc,
+        locationSource: 'gps'
+      }));
+      setLocationMode('auto');
+      showToast(`Exact GPS coordinates acquired (±${Math.round(acc || 10)}m)`, 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Could not acquire GPS signal. You can click on the map.', 'error');
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
+  const handleMapLocationChange = async (lat: number, lon: number, address?: string) => {
+    let newAddress = address;
+    if (!newAddress) {
+      try {
+        const rev = await reverseGeocodeCoordinates(lat, lon);
+        newAddress = rev.formatted_address;
+      } catch {
+        newAddress = `Location (${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E), Pune`;
+      }
+    }
+    setFormData((prev: any) => ({
+      ...prev,
+      location: newAddress || prev.location,
+      latitude: lat,
+      longitude: lon,
+      accuracy: null,
+      locationSource: 'map_picker'
+    }));
+  };
+
   const handleSaveLocation = async () => {
     try {
       await fetch('/api/auth/register-location', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: formData.userId, location: formData.location })
+        body: JSON.stringify({
+          user_id: formData.userId,
+          location: formData.location,
+          latitude: formData.latitude,
+          longitude: formData.longitude
+        })
       });
       setStep(4);
     } catch (e) {
@@ -218,7 +280,7 @@ export default function CitizenRegistration({ onNavigateLogin, onNavigateDashboa
     }
   };
 
-  const handleStep4Submit = async (e) => {
+  const handleStep4Submit = async (e: any) => {
     e.preventDefault();
     try {
       const res = await fetch('/api/auth/register-complete', {
@@ -233,7 +295,13 @@ export default function CitizenRegistration({ onNavigateLogin, onNavigateDashboa
 
       const data = await res.json();
       if (data.user) {
-        localStorage.setItem('smartgov_user', JSON.stringify(data.user));
+        const updatedUser = {
+          ...data.user,
+          location: formData.location || data.user.location,
+          preferred_latitude: formData.latitude ?? data.user.preferred_latitude,
+          preferred_longitude: formData.longitude ?? data.user.preferred_longitude
+        };
+        localStorage.setItem('smartgov_user', JSON.stringify(updatedUser));
       }
       setStep(5);
     } catch (err) {
@@ -522,63 +590,103 @@ export default function CitizenRegistration({ onNavigateLogin, onNavigateDashboa
               </div>
             )}
 
-            {/* STEP 3: SET LOCATION */}
+            {/* STEP 3: SET LOCATION WITH LEAFLET MAP */}
             {step === 3 && (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 <div>
-                  <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900"><span className="text-emerald-600">3</span> Set Your Location</h2>
-                  <p className="text-slate-500 text-xs sm:text-sm mt-1">This helps us show you relevant projects and issues in your area</p>
+                  <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900"><span className="text-emerald-600">3</span> Set Your Exact Location</h2>
+                  <p className="text-slate-500 text-xs sm:text-sm mt-1">Pinpoint your exact location on the Leaflet map to receive hyper-local civic updates</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => { setLocationMode('auto'); showToast('Location updated via GPS!', 'success'); }}
-                    className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all ${
-                      locationMode === 'auto'
-                        ? 'border-emerald-600 bg-emerald-50/60 text-emerald-900 font-bold'
-                        : 'border-slate-200 bg-white text-slate-700'
+                    onClick={handleUseCurrentLocation}
+                    disabled={isLocating}
+                    className={`flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all ${
+                      formData.locationSource === 'gps'
+                        ? 'border-blue-600 bg-blue-50/70 text-blue-900 font-bold shadow-xs'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    <LocateFixed className="w-6 h-6 mb-1 text-emerald-600" />
-                    <span className="text-xs font-bold">Use Current Location</span>
+                    <LocateFixed className="w-5 h-5 mb-1 text-blue-600" />
+                    <span className="text-xs font-bold">{isLocating ? 'Detecting GPS...' : 'Use Current GPS'}</span>
+                    <span className="text-[10px] text-slate-400 font-normal">Auto-detect device coordinates</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setLocationMode('manual')}
-                    className={`flex flex-col items-center justify-center p-4 rounded-2xl border transition-all ${
-                      locationMode === 'manual'
-                        ? 'border-emerald-600 bg-emerald-50/60 text-emerald-900 font-bold'
-                        : 'border-slate-200 bg-white text-slate-700'
+                    onClick={() => {
+                      setFormData((prev: any) => ({ ...prev, locationSource: 'map_picker' }));
+                      showToast('Click or drag pin anywhere on the Leaflet map', 'info');
+                    }}
+                    className={`flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all ${
+                      formData.locationSource !== 'gps'
+                        ? 'border-emerald-600 bg-emerald-50/70 text-emerald-900 font-bold shadow-xs'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
                     }`}
                   >
-                    <Search className="w-6 h-6 mb-1 text-slate-500" />
-                    <span className="text-xs font-bold">Search Manually</span>
+                    <MapPin className="w-5 h-5 mb-1 text-emerald-600" />
+                    <span className="text-xs font-bold">Pick on Leaflet Map</span>
+                    <span className="text-[10px] text-slate-400 font-normal">Drag pin or search street</span>
                   </button>
                 </div>
 
-                <div className="p-4 rounded-2xl border border-slate-200 bg-white shadow-sm flex items-start space-x-3">
-                  <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
-                    <MapPin className="w-5 h-5" />
+                {/* Leaflet Interactive Map Picker */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="font-bold text-slate-700">Interactive Leaflet Map</span>
+                    <span className="text-[10px] font-semibold text-emerald-700">
+                      Drag pin or click anywhere in city
+                    </span>
+                  </div>
+
+                  <LocationMapPicker
+                    latitude={formData.latitude}
+                    longitude={formData.longitude}
+                    accuracy={formData.accuracy}
+                    locationSource={formData.locationSource}
+                    interactive={true}
+                    height="240px"
+                    onLocationChange={handleMapLocationChange}
+                    onRequestGPS={handleUseCurrentLocation}
+                    gpsLoading={isLocating}
+                    showSearchBar={true}
+                  />
+                </div>
+
+                {/* Address and Coordinates Readout */}
+                <div className="p-3.5 rounded-2xl border border-slate-200 bg-white shadow-xs flex items-start space-x-3">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0 mt-0.5">
+                    <MapPin className="w-4 h-4" />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center justify-between">
-                      <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">Location Detected</div>
-                      <button type="button" className="text-xs font-bold text-blue-600 hover:underline">Change</button>
+                      <div className="text-[11px] font-bold text-emerald-700 uppercase tracking-wider">
+                        {formData.locationSource === 'gps' ? 'GPS Detected Address' : 'Map Pinpoint Address'}
+                      </div>
+                      {formData.locationSource === 'gps' && formData.accuracy != null && (
+                        <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200">
+                          GPS ±{Math.round(formData.accuracy)}m
+                        </span>
+                      )}
                     </div>
                     <input
                       type="text"
                       value={formData.location}
                       onChange={(e) => setFormData({ ...formData, location: e.target.value })}
                       className="w-full text-xs font-bold text-slate-800 bg-transparent border-0 p-0 mt-1 focus:ring-0"
+                      placeholder="e.g. Kothrud, Pune, Maharashtra"
                     />
+                    <div className="text-[10px] font-mono text-slate-400 mt-1">
+                      Exact Coords: {formData.latitude.toFixed(5)}°N, {formData.longitude.toFixed(5)}°E
+                    </div>
                   </div>
                 </div>
 
-                <div className="p-3.5 rounded-xl bg-blue-50/70 border border-blue-100 text-blue-800 text-xs flex items-center gap-2.5">
-                  <ShieldCheck className="w-5 h-5 text-blue-600 shrink-0" />
-                  <span>Your location is used only to improve your experience and will never be shared.</span>
+                <div className="p-3 rounded-xl bg-blue-50/70 border border-blue-100 text-blue-800 text-xs flex items-center gap-2.5">
+                  <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>Your exact coordinates are stored securely to power proximity-based civic alerts and projects near you.</span>
                 </div>
 
                 <button
